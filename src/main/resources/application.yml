@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: mybatis-plus-study
+
+  datasource:
+    mybatis_plus_one:
+      # mysql 6.0以上，需要加cj，6.0以下，com.mysql.jdbc.Driver，https://www.cnblogs.com/liaojie970/p/8916568.html
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      jdbc-url: jdbc:mysql://127.0.0.1:3306/mybatis_plus_one?serverTimezone=Asia/Shanghai&allowMultiQueries=true&useUnicode=true&characterEncoding=UTF-8&useSSL=false
+      username: root
+      password: root
+
+server:
+  port: 8081
+
