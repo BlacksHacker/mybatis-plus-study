@@ -1,11 +1,4 @@
-### MyBatis-plus学习总结
 
-
-#### 1. 简介
-
-   Mybatis-Plus 是MyBatis的增强工具，在MyBatis上只做增强，不做修改，为简化开发和提高效率而生。它自身封装好了一些crud方法，不需要我们再次编写具体的xml.[MyBatis官网地址](https://mp.baomidou.com/#/)
-
-#### 2. Spring整合MyBatis-Plus
    
    
    
@@ -13,8 +6,11 @@
 
 #### 架构原理
 
-##### 架构图
+![架构原理](src/main/resources/image/mybatis-1.png)
 
+##### 架构图
+![流程图](src/main/resources/image/mybatis-2.png)
+![流程图](src/main/resources/image/mybatis-3.png)
 
 1. MyBatis配置文件
     
@@ -539,7 +535,7 @@ public class SqlSessionFactoryBuilder{
 
 ##### 总结
 
-##### 贴图
+![mybatis初始化](src/main/resources/image/MyBatis初始化.png)
 
 #### 2.SqlSession的创建
 
@@ -639,7 +635,7 @@ public class Configuration{
 ```
 Executor继承图如下：
 
-#####  贴图
+![Executor结构图](src/main/resources/image/Mybatis-Executor.png)
 
 
 ##### 2.3 SqlSession实例的创建
@@ -678,7 +674,7 @@ public class DefaultSqlSession{
 
 #### 总结
 
-####### 贴图
+![SqlSession的创建](src/main/resources/image/SqlSession的创建.png)
 
 #### 3.SqlSession的执行
 
@@ -887,7 +883,7 @@ public class SimpleStatementHandler extends BaseStatementHandler {
         }
 }
 ```
-#### 插图
+![StatementHandler](src/main/resources/image/StatementHandler.png)
 
 configuration实例化StatementHandler,创建的是RoutingStatementHandler，但其本质只是门面类，其构造方法内部通过参数判断，
 创建了具体的StatementHandler子类实例，RoutingStatementHandler的方法的调用，本质上是具体实例化的StatementHandler的子类的调用。 
