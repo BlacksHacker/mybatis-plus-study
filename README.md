@@ -1167,3 +1167,193 @@ method的类型，决定具体调用SqlSession的哪个方法进行执行，即�
 
 ![SqlSession的执行](src/main/resources/image/SqlSession的执行.png)
 
+#### 4. mybatis-Spring容器初始化
+
+Spring中集成mybatis的包是Mybatis-Spring,Spring容器会负责SqlSessionFactory单例的创建
+```xml
+
+<bean id="sqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+  <!--指定数据源，不用再在mybatis的XML配置文件中指定environment了-->
+  <property name="dataSource" ref="dataSource" />
+  <!--指定configuration对象，它是创建sqlSessionFactory的核心，包含mybatis几乎全部的配置信息-->
+  <property name="configuration">
+    <bean class="org.apache.ibatis.session.Configuration">
+      <property name="mapUnderscoreToCamelCase" value="true"/>
+    </bean>
+  </property>
+  <!--数据库映射mapper文件的位置-->
+  <property  name="mapperLocations"  value="classpath*:com/xxt/ibatis/dbcp/**/*.xml"/>
+  <!--或指定指定sqlMapConfig总配置文件位置configLocation，建议采用这种mybatis配置单独放在另一个XML中的方式-->
+  <property  name="configLocation"  value="classpath:sqlMapConfig.xml"/> 
+</bean>
+```
+
+Spring在管理创建SqlSessionFactory的Bean时，其实现类指定的是SqlSessionFactoryBean类。通过该类的getObject()方法来获取sqlSessionFactory实例。
+```java
+public class SqlSessionFactoryBean implements FactoryBean<SqlSessionFactory>, InitializingBean, ApplicationListener<ApplicationEvent> {
+      @Override
+      public SqlSessionFactory getObject() throws Exception {
+        if (this.sqlSessionFactory == null) {
+          //开始初始化创建
+          afterPropertiesSet();
+        }
+    
+        return this.sqlSessionFactory;
+      }    
+    
+      @Override
+      public void afterPropertiesSet() throws Exception {
+        notNull(dataSource, "Property 'dataSource' is required");
+        notNull(sqlSessionFactoryBuilder, "Property 'sqlSessionFactoryBuilder' is required");
+    
+        this.sqlSessionFactory = buildSqlSessionFactory();
+      }
+    
+    protected SqlSessionFactory buildSqlSessionFactory() throws IOException {
+    
+        Configuration configuration;
+        //加载配置文件，进行解析，生成configuration对象
+        XMLConfigBuilder xmlConfigBuilder = null;
+        if (this.configLocation != null) {
+          xmlConfigBuilder = new XMLConfigBuilder(this.configLocation.getInputStream(), null, this.configurationProperties);
+          configuration = xmlConfigBuilder.getConfiguration();
+        } else {
+          if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("Property 'configLocation' not specified, using default MyBatis Configuration");
+          }
+          configuration = new Configuration();
+          configuration.setVariables(this.configurationProperties);
+        }
+    
+        if (this.objectFactory != null) {
+          configuration.setObjectFactory(this.objectFactory);
+        }
+    
+        if (this.objectWrapperFactory != null) {
+          configuration.setObjectWrapperFactory(this.objectWrapperFactory);
+        }
+    
+        if (hasLength(this.typeAliasesPackage)) {
+          String[] typeAliasPackageArray = tokenizeToStringArray(this.typeAliasesPackage,
+              ConfigurableApplicationContext.CONFIG_LOCATION_DELIMITERS);
+          for (String packageToScan : typeAliasPackageArray) {
+            configuration.getTypeAliasRegistry().registerAliases(packageToScan,
+                    typeAliasesSuperType == null ? Object.class : typeAliasesSuperType);
+            if (LOGGER.isDebugEnabled()) {
+              LOGGER.debug("Scanned package: '" + packageToScan + "' for aliases");
+            }
+          }
+        }
+    
+        if (!isEmpty(this.typeAliases)) {
+          for (Class<?> typeAlias : this.typeAliases) {
+            configuration.getTypeAliasRegistry().registerAlias(typeAlias);
+            if (LOGGER.isDebugEnabled()) {
+              LOGGER.debug("Registered type alias: '" + typeAlias + "'");
+            }
+          }
+        }
+    
+        if (!isEmpty(this.plugins)) {
+          for (Interceptor plugin : this.plugins) {
+            configuration.addInterceptor(plugin);
+            if (LOGGER.isDebugEnabled()) {
+              LOGGER.debug("Registered plugin: '" + plugin + "'");
+            }
+          }
+        }
+    
+        if (hasLength(this.typeHandlersPackage)) {
+          String[] typeHandlersPackageArray = tokenizeToStringArray(this.typeHandlersPackage,
+              ConfigurableApplicationContext.CONFIG_LOCATION_DELIMITERS);
+          for (String packageToScan : typeHandlersPackageArray) {
+            configuration.getTypeHandlerRegistry().register(packageToScan);
+            if (LOGGER.isDebugEnabled()) {
+              LOGGER.debug("Scanned package: '" + packageToScan + "' for type handlers");
+            }
+          }
+        }
+    
+        if (!isEmpty(this.typeHandlers)) {
+          for (TypeHandler<?> typeHandler : this.typeHandlers) {
+            configuration.getTypeHandlerRegistry().register(typeHandler);
+            if (LOGGER.isDebugEnabled()) {
+              LOGGER.debug("Registered type handler: '" + typeHandler + "'");
+            }
+          }
+        }
+    
+        if (this.databaseIdProvider != null) {//fix #64 set databaseId before parse mapper xmls
+          try {
+            configuration.setDatabaseId(this.databaseIdProvider.getDatabaseId(this.dataSource));
+          } catch (SQLException e) {
+            throw new NestedIOException("Failed getting a databaseId", e);
+          }
+        }
+    
+        if (this.vfs != null) {
+          configuration.setVfsImpl(this.vfs);
+        }
+    
+        if (xmlConfigBuilder != null) {
+          try {
+            xmlConfigBuilder.parse();
+    
+            if (LOGGER.isDebugEnabled()) {
+              LOGGER.debug("Parsed configuration file: '" + this.configLocation + "'");
+            }
+          } catch (Exception ex) {
+            throw new NestedIOException("Failed to parse config resource: " + this.configLocation, ex);
+          } finally {
+            ErrorContext.instance().reset();
+          }
+        }
+    
+        if (this.transactionFactory == null) {
+          //如果事务没有配置，则采用SpringAOP进行事务管理
+          this.transactionFactory = new SpringManagedTransactionFactory();
+        }
+    
+        configuration.setEnvironment(new Environment(this.environment, this.transactionFactory, this.dataSource));
+    
+        if (!isEmpty(this.mapperLocations)) {
+          for (Resource mapperLocation : this.mapperLocations) {
+            if (mapperLocation == null) {
+              continue;
+            }
+    
+            try {
+                //读取mapper配置，并进行解析
+              XMLMapperBuilder xmlMapperBuilder = new XMLMapperBuilder(mapperLocation.getInputStream(),
+                  configuration, mapperLocation.toString(), configuration.getSqlFragments());
+              xmlMapperBuilder.parse();
+            } catch (Exception e) {
+              throw new NestedIOException("Failed to parse mapping resource: '" + mapperLocation + "'", e);
+            } finally {
+              ErrorContext.instance().reset();
+            }
+    
+            if (LOGGER.isDebugEnabled()) {
+              LOGGER.debug("Parsed mapper file: '" + mapperLocation + "'");
+            }
+          }
+        } else {
+          if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("Property 'mapperLocations' was not specified or no matching resources found");
+          }
+        }
+        //通过SqlSessionFactoryBuilder完成SqlSessionFactory的构建
+        return this.sqlSessionFactoryBuilder.build(configuration);
+      }
+
+}
+```
+
+在创建SqlSessionFactory时指定mybatis配置信息，有三种方式：
+1. 直接指定configuration对象 包含配置信息和各项参数
+2. configLocation字符串，指定配置文件的地址
+3. 当configuration和configLocation均没有配置时，完全依靠Spring配置文件中对属性的指定。
+
+#### 总结
+
+Spring容器创建sqlSessionFactory，是通过SqlSessionFactoryBean进行创建，其内部本质上也是读取配置实例化Configuration对象，通过configuration对象创建DefaultSqlSessionFactory。
