@@ -1501,8 +1501,8 @@ public class SqlSessionUtils{
 }
 ```
 
-######总结：
+###### 总结：
 
 SqlSessionTemplate之所以线程安全，是因为sqlSession的代理在执行增强代理方法时，通过利用事务同步管理器（原理是利用ThreadLocal的特性）对sqlSession的产生和获取进行了管理，保证了在线程作用域下SqlSession对象的线程安全性。\
 
-参考博客：！[mybatis源码分析](https://zhuanlan.zhihu.com/p/185720964)
+参考博客：[mybatis源码分析](https://zhuanlan.zhihu.com/p/185720964)
