@@ -4,42 +4,45 @@
    
 ### MyBatis源码学习
 
-#### 架构原理
+####1. 架构原理
 
 ![架构原理](src/main/resources/image/mybatis-1.png)
 
-##### 架构图
+##### 1.1架构与层次结构图
 ![流程图](src/main/resources/image/mybatis-2.png)
 ![流程图](src/main/resources/image/mybatis-3.png)
 
-1. MyBatis配置文件
-    
-    - SqlMapConfig.xml 作为mybatis的全局配置文件，配置mybatis的运行环境
-    - Mapper.xml mybatis的sql映射文件，需要在SqlMapConfig.xml中加载
-    
-2. SqlSessionFactory
-    
-    - 通过Mybatis配置文件构建会话工厂SqlSessionFactory
-    
-3. SqlSession 
+####2.核心类
 
-    - 通过会话工厂创建的sqlSession即会话，通过sqlSession进行数据库的操作
+#####2.1. MyBatis配置文件
+ 
+  - SqlMapConfig.xml 作为mybatis的全局配置文件，配置mybatis的运行环境
+  - Mapper.xml mybatis的sql映射文件，需要在SqlMapConfig.xml中加载
     
-4. Executor执行器
-
-    - Mybatis运行的核心，调度器，调用mybatis三大组件的执行。
+#####2.2. SqlSessionFactory
     
-5. MappedStatement
+  - 通过Mybatis配置文件构建会话工厂SqlSessionFactory
+    
+#####2.3. SqlSession 
 
-    - Mybatis底层封装对象，包含mybatis配置信息和sql的映射信息，mapper.xml中一个delete标签对应一个Mapped Statement对象，标签的ID即是MappedStatement的id。
-    - MappedStatement对sql执行输入参数定义，包括HashMap、基本类型和pojo，Executor通过MappedStatement在执行sql前将输入的java对象映射至sql中，输入参数映射就是jdbc编程中对preparedStatement设置参数
-    - MappedStatement对sql执行输出结果定义，输出结果映射过程相当于jdbc编程中对结果的解析处理过程。
-6. 
+   - 通过会话工厂创建的sqlSession即会话，通过sqlSession进行数据库的操作
+    
+#####2.4. Executor执行器
 
+   - Mybatis运行的核心，调度器，调用mybatis三大组件的执行。
+    
+#####2.5. MappedStatement
 
-#### 1.SqlSessionFactory的创建
+   - Mybatis底层封装对象，包含mybatis配置信息和sql的映射信息，mapper.xml中一个delete标签对应一个Mapped Statement对象，标签的ID即是MappedStatement的id。
+   - MappedStatement对sql执行输入参数定义，包括HashMap、基本类型和pojo，Executor通过MappedStatement在执行sql前将输入的java对象映射至sql中，输入参数映射就是jdbc编程中对preparedStatement设置参数
+   - MappedStatement对sql执行输出结果定义，输出结果映射过程相当于jdbc编程中对结果的解析处理过程。
+
+#### 3.源码解析
+
+##### 3.1 SqlSessionFactory的创建
 
 初始化Mybatis的过程，就是创建SqlSessionFactory单例的过程
+
 1. mybatis读取全局xml配置文件，解析xml元素结点
 2. 将xml结点值设置到configuration实例的相关变量中
 3. 由configuration实例创建SqlSessionFactory实例
@@ -141,7 +144,7 @@ public class XMLConfigBuilder extends BaseBuilder {
 }
 ```
 
-###### mapperElement
+###### 3.1.1 mapperElement
 
 mappers定义了SQL语句映射关系
 
@@ -305,8 +308,8 @@ knowsMappers是是一个HashMap类型, 其键值就是mapper接口的class对象
  
  }
 ```
-与此同时在MapperRegistry的addMapper中，根据不同的mapper 的class创建对应的MapperAnnotationBuilder，通过parse解析，以及parseStatement方法的调用，将mapper中的对应的具体方法method解析，生成MapperStatement,即一个mapper类的一个方法对应一个MapperStatement,并将MapperStatement
-加入到Configuration的对象的mappedStatements属性中，其结构为StrictMap，以mapperStatement的id为key，mapperStatement为value。其ID本质为mapper的类名+方法名，构成mapperStatement的唯一ID.
+与此同时在MapperRegistry的addMapper中，根据不同的mapper 的class创建对应的MapperAnnotationBuilder，通过parse解析，以及parseStatement方法的调用，将mapper中的对应的具体方法method解析，生成mappedStatement,即一个mapper类的一个方法对应一个mappedStatement,并将mappedStatement
+加入到Configuration的对象的mappedStatements属性中，其结构为StrictMap，以mappedStatement的id为key，mappedStatement为value。其ID本质为mapper的类名+方法名，构成mappedStatement的唯一ID.
 ```java
 public class MapperRegistry {
      public <T> void addMapper(Class<T> type) {
@@ -363,7 +366,7 @@ public class MapperAnnotationBuilder{
       Class<?> parameterTypeClass = getParameterType(method);
       LanguageDriver languageDriver = getLanguageDriver(method);
 
-        //sqlSource是MapperStatement的一个属性，用来提供BoundSQL对象
+        //sqlSource是mappedStatement的一个属性，用来提供BoundSQL对象
         //BoundSql用来建立sql语句，它包含sql String，入参parameterObject和入参映射parameterMappings。它利用sql语句和入参，组装成最终的访问数据库的SQL语句，包括动态SQL。这是mybatis Mapper映射的最核心的地方
       SqlSource sqlSource = getSqlSourceFromAnnotations(method, parameterTypeClass, languageDriver);
       if (sqlSource != null) {
@@ -505,7 +508,7 @@ public class MapperBuildAssistant{
         if (statementParameterMap != null) {
           statementBuilder.parameterMap(statementParameterMap);
         }   
-        //创建mapperStatement，调用configuration方法，加入MapperStatements中
+        //创建mappedStatement，调用configuration方法，加入mappedStatements中
         MappedStatement statement = statementBuilder.build();
         configuration.addMappedStatement(statement);
         return statement; 
@@ -533,11 +536,11 @@ public class SqlSessionFactoryBuilder{
 
 至此 mybatis的初始化完毕！
 
-##### 总结
+###### 3.1.2 总结
 
 ![mybatis初始化](src/main/resources/image/MyBatis初始化.png)
 
-#### 2.SqlSession的创建
+##### 3.2 SqlSession的创建
 
    Mybatis运行阶段，每次运行都是通过SqlSession来执行，是作为运行的核心，其本身不是线程安全的，一般放在局部作用域中，用完close掉。
  
@@ -580,7 +583,7 @@ public class DefaultSqlSessionFactory implements SqlSessionFactory {
 ```
 sqlSession的创建本质是其默认实现类DefaultSqlSession的实例的创建，通过读取配置文件，获取对应的事务工厂，若没有设置，则默认采用容器的事务管理工厂。通过配置文件设置，创建对应的执行器Executor，最后创建sqlSession实例
 
-##### 2.1 事务工厂的创建
+###### 3.2.1 事务工厂的创建
 
 Mybatis事务工厂接口TransactionFactory有两个实现类
 
@@ -606,7 +609,7 @@ public class JdbcTransactionFactory implements TransactionFactory {
   }
 }
 ```
-##### 2.2 Executor的创建
+###### 3.2.2 Executor的创建
 
 Executor是mybatis运行的核心，sqlSession内部的执行基本通过调度器Executor进行执行，通过Executor来调度StatementHandler、ParameterHandler和ResultSetHandler，四者合称mybatis四大组件。
 ```java
@@ -638,7 +641,7 @@ Executor继承图如下：
 ![Executor结构图](src/main/resources/image/Mybatis-Executor.png)
 
 
-##### 2.3 SqlSession实例的创建
+###### 3.2.3 SqlSession实例的创建
 
 SqlSession本身的 select update等方法的实现，内部是Executor作为代理执行
 ```java
@@ -672,15 +675,15 @@ public class DefaultSqlSession{
 ```
 
 
-#### 总结
+###### 3.2.4 总结
 
 ![SqlSession的创建](src/main/resources/image/SqlSession的创建.png)
 
-#### 3.SqlSession的执行
+##### 3.3.SqlSession的执行
 
-##### 3.1 mybatis基于select update insert delete的方法查询
+###### 3.3.1 mybatis基于select update insert delete的方法查询
 
-###### 3.1.1 查询流程
+查询流程
 
 sqlSession的执行方法，本质是executor进行代理执行
 ```java
@@ -689,7 +692,7 @@ public class DefaultSqlSession{
         //parameter 为参数， RowBounds为逻辑分页
       public <E> List<E> selectList(String statement, Object parameter, RowBounds rowBounds) {
         try {
-           //根据mapperStatementId获取对应的ms
+           //根据mappedStatementId获取对应的ms
           MappedStatement ms = configuration.getMappedStatement(statement);
           //由Executor代理进行执行
           return executor.query(ms, wrapCollection(parameter), rowBounds, Executor.NO_RESULT_HANDLER);
@@ -888,11 +891,11 @@ public class SimpleStatementHandler extends BaseStatementHandler {
 configuration实例化StatementHandler,创建的是RoutingStatementHandler，但其本质只是门面类，其构造方法内部通过参数判断，
 创建了具体的StatementHandler子类实例，RoutingStatementHandler的方法的调用，本质上是具体实例化的StatementHandler的子类的调用。 
 
-总的来说 SqlSession查询的流程就是executor代理进行执行，通过mapperStatement的id拿到对应mapperStatement，然后再拿到内部已经解析好的BoundSql，获取到最终的查询sql，
-另外configuration通过mapperStatement创建对应的statementHandler实例，通过statementHandler再拿到对应的Statement，底层最终通过JDBC的statement执行sql完成数据查询。
+总的来说 SqlSession查询的流程就是executor代理进行执行，通过mappedStatement的id拿到对应mappedStatement，然后再拿到内部已经解析好的BoundSql，获取到最终的查询sql，
+另外configuration通过mappedStatement创建对应的statementHandler实例，通过statementHandler再拿到对应的Statement，底层最终通过JDBC的statement执行sql完成数据查询。
 当然期间还涉及缓存的流程，以及针对不同的StatemntHandler涉及不同的组件，比如ParameterHandler等。
 
-###### 3.1.2 数据转换流程（ResultSetHandler）
+ 数据转换流程（ResultSetHandler）
 
 数据库的查询结果已经通过JDBC的查询拿到为ResultSet，ResultSetHandler组件的作用就是将其转换为Java的POJO,其默认实现为DefaultResultSetHandler，允许用户通过配置进行插件覆盖。
 
@@ -907,7 +910,7 @@ public class DefaultResultSetHandler{
         int resultSetCount = 0;
         //从JDBC数据库的Statement中取出结果ResultSet
         ResultSetWrapper rsw = getFirstResultSet(stmt);
-        //resultMap定义了数据库列和java属性之间的映射关系，初始化mapperStatement时存储到其中
+        //resultMap定义了数据库列和java属性之间的映射关系，初始化mappedStatement时存储到其中
         List<ResultMap> resultMaps = mappedStatement.getResultMaps();
         int resultMapCount = resultMaps.size();
         validateResultMapsCount(rsw, resultMapCount);
@@ -988,15 +991,15 @@ public abstract class BaseStatementHandler implements StatementHandler {
       }    
 }
 ```
-在StatementHandler的实现类完成数据库查询后，拿到了ResultSet，这时需要通过ResultSetHandler进行数据映射处理，通过mapperStatement获取到配置的ResultMap，即数据库列与java pojo之间的映射关系，再通过statement获取到sql执行结果集
+在StatementHandler的实现类完成数据库查询后，拿到了ResultSet，这时需要通过ResultSetHandler进行数据映射处理，通过mappedStatement获取到配置的ResultMap，即数据库列与java pojo之间的映射关系，再通过statement获取到sql执行结果集
 ResultSet，然后遍历结果集进行转化组装。包括处理嵌套映射等等，最终构造成List，将处理后的结果集返回。
 
-#####总结 
+###### 总结 
 
 mybatis的执行过程，本质就是其四大组件的配置使用，Executor负责调度 statementHandler负责statement的产生和执行，ParameterHandler负责statement在过程中的转化，
 最终由ResultSetHandler完成数据库数据到Java POJO的映射和转化。
 
-#### 3.2 mybatis 基于mapper的执行方式
+###### 3.3.2 mybatis 基于mapper的执行方式
 
 ```java
 // 创建sqlSession实例，用它来进行数据库操作，mybatis运行时的门面
@@ -1007,7 +1010,8 @@ UserMapper mapper = session.getMapper(UserMapper.class);
 User user = mapper.findUserBy
 ```
 
-##### 3.2.1 getMapper() mapper获取解析
+
+ getMapper() mapper获取解析
 
 ```java
 public class DefaultSqlSession{
@@ -1163,11 +1167,11 @@ public class MapperMethod {
 method的类型，决定具体调用SqlSession的哪个方法进行执行，即本质也是sqlSession的方法进行执行。
 
 
-#### 总结
+###### 总结
 
 ![SqlSession的执行](src/main/resources/image/SqlSession的执行.png)
 
-#### 4. mybatis-Spring容器初始化
+##### 3.4. mybatis-Spring容器初始化
 
 Spring中集成mybatis的包是Mybatis-Spring,Spring容器会负责SqlSessionFactory单例的创建
 ```xml
@@ -1354,17 +1358,17 @@ public class SqlSessionFactoryBean implements FactoryBean<SqlSessionFactory>, In
 2. configLocation字符串，指定配置文件的地址
 3. 当configuration和configLocation均没有配置时，完全依靠Spring配置文件中对属性的指定。
 
-#### 总结
+###### 总结
 
 Spring容器创建sqlSessionFactory，是通过SqlSessionFactoryBean进行创建，其内部本质上也是读取配置实例化Configuration对象，通过configuration对象创建DefaultSqlSessionFactory。
 
-#### 4.1 mybatis-spring的数据库交互（SqlSessionTemplate）
+##### 3.4 mybatis-spring的数据库交互（SqlSessionTemplate）
 
 SqlSession本身不是线程安全的，虽然利用Spring容器可以进行SqlSessionFactory的注入和管理，但是针对SqlSession确是不行。Spring给出的解决方案是SqlSessionTemplate。
 
 SqlSessionTemplate是SqlSession的线程安全实现类，交由Spring容器进行管理
 
-##### 4.1.1 SqlSessionTemplate的创建
+###### 3.4.1 SqlSessionTemplate的创建
 ```java
 public class SqlSessionTemplate implements SqlSession, DisposableBean {
       public SqlSessionTemplate(SqlSessionFactory sqlSessionFactory, ExecutorType executorType,
@@ -1497,6 +1501,8 @@ public class SqlSessionUtils{
 }
 ```
 
-总结一下：
+######总结：
 
-SqlSessionTemplate之所以线程安全，是因为sqlSession的代理在执行增强代理方法时，通过利用事务同步管理器（原理是利用ThreadLocal的特性）对sqlSession的产生和获取进行了管理，保证了在线程作用域下SqlSession对象的线程安全性。
+SqlSessionTemplate之所以线程安全，是因为sqlSession的代理在执行增强代理方法时，通过利用事务同步管理器（原理是利用ThreadLocal的特性）对sqlSession的产生和获取进行了管理，保证了在线程作用域下SqlSession对象的线程安全性。\
+
+参考博客：！[mybatis源码分析](https://zhuanlan.zhihu.com/p/185720964)
