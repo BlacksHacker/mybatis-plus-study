@@ -4,7 +4,7 @@
    
 ### MyBatis源码学习
 
-####1. 架构原理
+#### 1. 架构原理
 
 ![架构原理](src/main/resources/image/mybatis-1.png)
 
@@ -12,26 +12,26 @@
 ![流程图](src/main/resources/image/mybatis-2.png)
 ![流程图](src/main/resources/image/mybatis-3.png)
 
-####2.核心类
+#### 2.核心类
 
-#####2.1. MyBatis配置文件
+##### 2.1. MyBatis配置文件
  
   - SqlMapConfig.xml 作为mybatis的全局配置文件，配置mybatis的运行环境
   - Mapper.xml mybatis的sql映射文件，需要在SqlMapConfig.xml中加载
     
-#####2.2. SqlSessionFactory
+##### 2.2. SqlSessionFactory
     
   - 通过Mybatis配置文件构建会话工厂SqlSessionFactory
     
-#####2.3. SqlSession 
+##### 2.3. SqlSession 
 
    - 通过会话工厂创建的sqlSession即会话，通过sqlSession进行数据库的操作
     
-#####2.4. Executor执行器
+##### 2.4. Executor执行器
 
    - Mybatis运行的核心，调度器，调用mybatis三大组件的执行。
     
-#####2.5. MappedStatement
+##### 2.5. MappedStatement
 
    - Mybatis底层封装对象，包含mybatis配置信息和sql的映射信息，mapper.xml中一个delete标签对应一个Mapped Statement对象，标签的ID即是MappedStatement的id。
    - MappedStatement对sql执行输入参数定义，包括HashMap、基本类型和pojo，Executor通过MappedStatement在执行sql前将输入的java对象映射至sql中，输入参数映射就是jdbc编程中对preparedStatement设置参数
