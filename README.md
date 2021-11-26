@@ -1357,3 +1357,146 @@ public class SqlSessionFactoryBean implements FactoryBean<SqlSessionFactory>, In
 #### 总结
 
 Spring容器创建sqlSessionFactory，是通过SqlSessionFactoryBean进行创建，其内部本质上也是读取配置实例化Configuration对象，通过configuration对象创建DefaultSqlSessionFactory。
+
+#### 4.1 mybatis-spring的数据库交互（SqlSessionTemplate）
+
+SqlSession本身不是线程安全的，虽然利用Spring容器可以进行SqlSessionFactory的注入和管理，但是针对SqlSession确是不行。Spring给出的解决方案是SqlSessionTemplate。
+
+SqlSessionTemplate是SqlSession的线程安全实现类，交由Spring容器进行管理
+
+##### 4.1.1 SqlSessionTemplate的创建
+```java
+public class SqlSessionTemplate implements SqlSession, DisposableBean {
+      public SqlSessionTemplate(SqlSessionFactory sqlSessionFactory, ExecutorType executorType,
+          PersistenceExceptionTranslator exceptionTranslator) {
+    
+        notNull(sqlSessionFactory, "Property 'sqlSessionFactory' is required");
+        notNull(executorType, "Property 'executorType' is required");
+    
+        this.sqlSessionFactory = sqlSessionFactory;
+        this.executorType = executorType;
+        this.exceptionTranslator = exceptionTranslator;
+        //生成sqlSession的动态代理，后续的sqlSessionTemplate的方法都是通过该代理来执行的
+        this.sqlSessionProxy = (SqlSession) newProxyInstance(
+            SqlSessionFactory.class.getClassLoader(),
+            new Class[] { SqlSession.class },
+            new SqlSessionInterceptor());
+      }
+        
+      private class SqlSessionInterceptor implements InvocationHandler {
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+          //获取sqlSession实例，底层采用线程安全的方案来获取和生成sqlSession，这里是sqlSession线程安全的核心
+          SqlSession sqlSession = getSqlSession(
+              SqlSessionTemplate.this.sqlSessionFactory,
+              SqlSessionTemplate.this.executorType,
+              SqlSessionTemplate.this.exceptionTranslator);
+          try {
+            Object result = method.invoke(sqlSession, args);
+            if (!isSqlSessionTransactional(sqlSession, SqlSessionTemplate.this.sqlSessionFactory)) {
+              // force commit even on non-dirty sessions because some databases require
+              // a commit/rollback before calling close()
+              sqlSession.commit(true);
+            }
+            return result;
+          } catch (Throwable t) {
+            Throwable unwrapped = unwrapThrowable(t);
+            if (SqlSessionTemplate.this.exceptionTranslator != null && unwrapped instanceof PersistenceException) {
+              // release the connection to avoid a deadlock if the translator is no loaded. See issue #22
+              closeSqlSession(sqlSession, SqlSessionTemplate.this.sqlSessionFactory);
+              sqlSession = null;
+              Throwable translated = SqlSessionTemplate.this.exceptionTranslator.translateExceptionIfPossible((PersistenceException) unwrapped);
+              if (translated != null) {
+                unwrapped = translated;
+              }
+            }
+            throw unwrapped;
+          } finally {
+            if (sqlSession != null) {
+              closeSqlSession(sqlSession, SqlSessionTemplate.this.sqlSessionFactory);
+            }
+          }
+        }
+      }
+
+}
+
+public class SqlSessionUtils{
+      public static SqlSession getSqlSession(SqlSessionFactory sessionFactory, ExecutorType executorType, PersistenceExceptionTranslator exceptionTranslator) {
+    
+        notNull(sessionFactory, NO_SQL_SESSION_FACTORY_SPECIFIED);
+        notNull(executorType, NO_EXECUTOR_TYPE_SPECIFIED);
+        //先从事务同步管理器中获取当前线程下的sessionFactory对应的sqlSessionHolder
+        //同一线程下的SessionFactory，对应同一个SQLSession,即Spring容器下保证同一线程下 SessionFactory和SqlSession都是单实例
+        SqlSessionHolder holder = (SqlSessionHolder) TransactionSynchronizationManager.getResource(sessionFactory);
+    
+        //从SessionHolder缓存中，获取Session对象，如果存在就返回
+        SqlSession session = sessionHolder(executorType, holder);
+        if (session != null) {
+          return session;
+        }
+    
+        if (LOGGER.isDebugEnabled()) {
+          LOGGER.debug("Creating a new SqlSession");
+        }
+        
+        //SqlSession不存在时，常规创建sqlSession。
+        session = sessionFactory.openSession(executorType);
+        //将该SqlSession注册到缓存中，添加到同步事务管理器的threadLocal中,即通过不同线程下，由不同的ThreadLocal实例的特性，来保证SqlSession的线程安全。
+        registerSessionHolder(sessionFactory, executorType, exceptionTranslator, session);
+    
+        return session;
+      }    
+}
+```
+小结一下，SqlSessionTemplate本身是SqlSession的实现类，其构造方法的本质也是通过动态代理的形式，产生sqlSession的代理，代理去完成与数据库的交互，其线程安全的核心在于，在创建sqlSession代理的过程中，
+在创建SqlSession的这一步动了手脚，即将创建的sqlSession，利用ThreadLocal在不同线程下会创建不同实例的特性，交付于其进行管理，保证同一线程下，sqlSession始终为一份，且不改变，保证了SqlSession的线程安全
+
+下面分析将sqlSession添加进线程安全容器这一步
+
+```java
+public class SqlSessionUtils{
+      private static void registerSessionHolder(SqlSessionFactory sessionFactory, ExecutorType executorType,
+          PersistenceExceptionTranslator exceptionTranslator, SqlSession session) {
+        SqlSessionHolder holder;
+        //开启了事务同步功能
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+          Environment environment = sessionFactory.getConfiguration().getEnvironment();
+          //事务是否交由Spring事务管理器管理
+          if (environment.getTransactionFactory() instanceof SpringManagedTransactionFactory) {
+            if (LOGGER.isDebugEnabled()) {
+              LOGGER.debug("Registering transaction synchronization for SqlSession [" + session + "]");
+            }
+            //构建SessionHolder缓存对象
+            holder = new SqlSessionHolder(session, executorType, exceptionTranslator);
+            //将缓存对象，以当前线程的sessionFactory做为key，加入到同步事务管理map中
+            TransactionSynchronizationManager.bindResource(sessionFactory, holder);
+            //注册同步事务，TransactionSynchronizationManager其内部管理了一个ThreadLocal,其内部维护一个TransactionSynchronization的Set集合，解决线程安全的关键所在
+            TransactionSynchronizationManager.registerSynchronization(new SqlSessionSynchronization(holder, sessionFactory));
+            //开始事务同步功能
+            holder.setSynchronizedWithTransaction(true);
+            
+            //加锁
+            holder.requested();
+          } else {
+            if (TransactionSynchronizationManager.getResource(environment.getDataSource()) == null) {
+              if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("SqlSession [" + session + "] was not registered for synchronization because DataSource is not transactional");
+              }
+            } else {
+              throw new TransientDataAccessResourceException(
+                  "SqlSessionFactory must be using a SpringManagedTransactionFactory in order to use Spring transaction synchronization");
+            }
+          }
+        } else {
+          if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("SqlSession [" + session + "] was not registered for synchronization because synchronization is not active");
+          }
+        }
+    }
+}
+```
+
+总结一下：
+
+SqlSessionTemplate之所以线程安全，是因为sqlSession的代理在执行增强代理方法时，通过利用事务同步管理器（原理是利用ThreadLocal的特性）对sqlSession的产生和获取进行了管理，保证了在线程作用域下SqlSession对象的线程安全性。
