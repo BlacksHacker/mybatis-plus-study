@@ -996,3 +996,174 @@ ResultSet，然后遍历结果集进行转化组装。包括处理嵌套映射�
 mybatis的执行过程，本质就是其四大组件的配置使用，Executor负责调度 statementHandler负责statement的产生和执行，ParameterHandler负责statement在过程中的转化，
 最终由ResultSetHandler完成数据库数据到Java POJO的映射和转化。
 
+#### 3.2 mybatis 基于mapper的执行方式
+
+```java
+// 创建sqlSession实例，用它来进行数据库操作，mybatis运行时的门面
+SqlSession session = sessionFactory.openSession();
+// 获取mapper接口动态代理对象
+UserMapper mapper = session.getMapper(UserMapper.class);
+// 利用动态代理调用mapper的相关方法
+User user = mapper.findUserBy
+```
+
+##### 3.2.1 getMapper() mapper获取解析
+
+```java
+public class DefaultSqlSession{
+      @Override
+      public <T> T getMapper(Class<T> type) {
+        return configuration.<T>getMapper(type, this);
+      }    
+}
+
+public class Configuration{
+      public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
+        return mapperRegistry.getMapper(type, sqlSession);
+      }
+}
+
+public class MapperRegistry{
+      public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
+        final MapperProxyFactory<T> mapperProxyFactory = (MapperProxyFactory<T>) knownMappers.get(type);
+        if (mapperProxyFactory == null) {
+          throw new BindingException("Type " + type + " is not known to the MapperRegistry.");
+        }
+        try {
+          return mapperProxyFactory.newInstance(sqlSession);
+        } catch (Exception e) {
+          throw new BindingException("Error getting mapper instance. Cause: " + e, e);
+        }
+      }
+}
+
+public class MapperProxyFactory<T>{
+     @SuppressWarnings("unchecked")
+      protected T newInstance(MapperProxy<T> mapperProxy) {
+        return (T) Proxy.newProxyInstance(mapperInterface.getClassLoader(), new Class[] { mapperInterface }, mapperProxy);
+      }
+    
+      public T newInstance(SqlSession sqlSession) {
+        final MapperProxy<T> mapperProxy = new MapperProxy<T>(sqlSession, mapperInterface, methodCache);
+        return newInstance(mapperProxy);
+      }
+}
+```
+
+通过上述代码可以看到mapper的获取本质是通过configuration中的mapperRegistry进行获取返回，在Myabtis初始化阶段，所有的mapper接口被扫描到，转化为其代理工厂MapperProxyFactory，存储在MapperRegistry的map中。
+现在则是通过mapper接口的类文件，获取到对应的mapper代理工厂，通过mapperProxyFactory生成最终的mapper代理（这里的mapper代理并不是mapperProxy，mapperProxy仅仅实现了InvocationHandler接口，作为mapper执行方法的增强），其生成运用了java动态代理。
+
+以上就是mapper代理的获取，下面就是mapper代理的具体方法的执行
+
+首先mapper方法的执行，因为被代理，所以先看MapperProxy中的invoke方法做了哪些操作（即mapper代理比mapper多做了哪些操作）
+```java
+public class MapperProxy<T> implements InvocationHandler, Serializable {
+      @Override
+      public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+       
+        if (Object.class.equals(method.getDeclaringClass())) {
+          try {
+            return method.invoke(this, args);
+          } catch (Throwable t) {
+            throw ExceptionUtil.unwrapThrowable(t);
+          }
+        }
+        //生成mapperMethod，如果没有则从cache中进行互获取
+        final MapperMethod mapperMethod = cachedMapperMethod(method);
+        return mapperMethod.execute(sqlSession, args);
+      }
+    
+      private MapperMethod cachedMapperMethod(Method method) {
+        MapperMethod mapperMethod = methodCache.get(method);
+        if (mapperMethod == null) {
+          mapperMethod = new MapperMethod(mapperInterface, method, sqlSession.getConfiguration());
+          methodCache.put(method, mapperMethod);
+        }
+        return mapperMethod;
+      }
+}
+
+public class MapperMethod {
+    //构造方法中，根据参数，完成 SqlCommand和MethodSignature的构造。
+    public MapperMethod(Class<?> mapperInterface, Method method, Configuration config) {
+        // 创建SqlCommand，包含sql的id和type两个关键字段，type即sql的类型，如select、insert等
+        this.command = new SqlCommand(config, mapperInterface, method);
+        //包含方法的返回值returmType等关键字段
+        this.method = new MethodSignature(config, method);
+      }
+
+      public Object execute(SqlSession sqlSession, Object[] args) {
+        Object result;
+        if (SqlCommandType.INSERT == command.getType()) {
+          Object param = method.convertArgsToSqlCommandParam(args);
+          //插入操作，调用sqlSession的insert方法
+          result = rowCountResult(sqlSession.insert(command.getName(), param));
+        } else if (SqlCommandType.UPDATE == command.getType()) {
+          Object param = method.convertArgsToSqlCommandParam(args);
+          //更新操作，调用SqlSession的update方法
+          result = rowCountResult(sqlSession.update(command.getName(), param));
+        } else if (SqlCommandType.DELETE == command.getType()) {
+          Object param = method.convertArgsToSqlCommandParam(args);
+          //删除操作，调用SqlSession的delete方法
+          result = rowCountResult(sqlSession.delete(command.getName(), param));
+        } else if (SqlCommandType.SELECT == command.getType()) {
+          if (method.returnsVoid() && method.hasResultHandler()) {
+            方法返回void并且存在结果转换器ResultSetHandler
+            executeWithResultHandler(sqlSession, args);
+            result = null;
+          } else if (method.returnsMany()) {
+            //多结果返回
+            result = executeForMany(sqlSession, args);
+          } else if (method.returnsMap()) {
+            //返回Map
+            result = executeForMap(sqlSession, args);
+          } else {
+            Object param = method.convertArgsToSqlCommandParam(args);
+            //返回单个，执行sqlSession的selectOne
+            result = sqlSession.selectOne(command.getName(), param);
+          }
+        } else if (SqlCommandType.FLUSH == command.getType()) {
+            result = sqlSession.flushStatements();
+        } else {
+          throw new BindingException("Unknown execution method for: " + command.getName());
+        }
+        if (result == null && method.getReturnType().isPrimitive() && !method.returnsVoid()) {
+          throw new BindingException("Mapper method '" + command.getName() 
+              + " attempted to return null from a method with a primitive return type (" + method.getReturnType() + ").");
+        }
+        return result;
+      }    
+
+      private <E> Object executeForMany(SqlSession sqlSession, Object[] args) {
+        List<E> result;
+        //转换参数
+        Object param = method.convertArgsToSqlCommandParam(args);
+        //判断方法是否定义了分页
+        if (method.hasRowBounds()) {
+          //分页查询执行
+          RowBounds rowBounds = method.extractRowBounds(args);
+          result = sqlSession.<E>selectList(command.getName(), param, rowBounds);
+        } else {
+          //不分页查询执行
+          result = sqlSession.<E>selectList(command.getName(), param);
+        }
+        // issue #510 Collections & arrays support
+        if (!method.getReturnType().isAssignableFrom(result.getClass())) {
+          if (method.getReturnType().isArray()) {
+            return convertToArray(result);
+          } else {
+            return convertToDeclaredCollection(sqlSession.getConfiguration(), result);
+          }
+        }
+        return result;
+      }
+}
+```
+以上就是mapper模式下的mybatis进行mapper类型执行过程，即在mapper的代理中，通过构建mapper的执行类mapperMethod，调用mapperMethod的execute方法，通过判断
+method的类型，决定具体调用SqlSession的哪个方法进行执行，即本质也是sqlSession的方法进行执行。
+
+
+#### 总结
+
+![SqlSession的执行](src/main/resources/image/SqlSession的执行.png)
+
